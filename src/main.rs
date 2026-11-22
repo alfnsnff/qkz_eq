@@ -276,14 +276,21 @@ impl App {
                         };
                         ui.label(RichText::new(format!("{:+.1} dB", b.gain)).size(15.0).color(gcol));
                         ui.add_space(4.0);
+                        // Vertical sliders ignore the parent's center alignment, so place one in an explicit centered rect.
+                        let (row, _) =
+                            ui.allocate_exact_size(Vec2::new(ui.available_width(), 200.0), egui::Sense::hover());
+                        let slot = egui::Rect::from_center_size(row.center(), Vec2::new(32.0, 200.0));
                         let s = ui
-                            .add_enabled(
-                                eq_on,
-                                egui::Slider::new(&mut b.gain, -12.0..=12.0)
-                                    .vertical()
-                                    .step_by(0.1)
-                                    .show_value(false),
-                            )
+                            .add_enabled_ui(eq_on, |ui| {
+                                ui.put(
+                                    slot,
+                                    egui::Slider::new(&mut b.gain, -12.0..=12.0)
+                                        .vertical()
+                                        .step_by(0.1)
+                                        .show_value(false),
+                                )
+                            })
+                            .inner
                             .on_hover_text("Double-click: 0 dB");
                         if s.double_clicked() {
                             b.gain = 0.0;
