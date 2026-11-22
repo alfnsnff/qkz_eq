@@ -48,7 +48,9 @@ Filter type `0` behaves as a peaking filter. Other values are untested.
 | `0x3A` | PGA L | `3` | unknown scale |
 | `0x3B` | PGA R | `13` | unknown scale |
 | `0x65` | Digital ADC gain | `0x100` | unknown scale |
-| `0x66` | Digital DAC gain | `0x200` | experimental (used as preamp) |
+| `0x66` | Digital DAC gain | `0x200` | confirmed as output volume |
+
+Notes on `0x66`: lowering it to `0x100` / `0x080` audibly reduces volume with no other change. With a +12 dB band at 60 Hz and full-scale input, no clipping was heard even at `0x200`, so the EQ appears to have internal headroom and `0x66` is not needed as an anti-clipping preamp. Exact scale (linear vs. dB steps) is not measured.
 
 ## Unknown
 

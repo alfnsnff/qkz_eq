@@ -23,7 +23,7 @@ The vendor ships no PC software for this dongle. `qkz_eq` talks to the chip dire
 - Live frequency-response curve
 - Read / Apply with per-band change tracking, or optional auto-apply on release
 - Built-in presets plus your own, saved on the PC as JSON
-- Experimental preamp (digital DAC gain register)
+- Output gain trim under *Lanjutan* (digital DAC gain register)
 - Single native binary (Rust + [egui](https://github.com/emilk/egui)), no runtime needed
 
 ## Supported devices
@@ -77,7 +77,7 @@ docs/            Protocol and register documentation
 ## Roadmap
 
 - [ ] Identify filter `type` values (shelf / pass filters)
-- [ ] Confirm preamp register scale
+- [ ] Measure output gain register scale
 - [ ] Support more KT Micro VID/PIDs
 - [ ] Optional save-to-flash, once the command is understood
 - [ ] Prebuilt release binaries

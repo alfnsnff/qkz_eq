@@ -13,6 +13,7 @@ const ACCENT: Color32 = Color32::from_rgb(94, 156, 255);
 const PENDING: Color32 = Color32::from_rgb(255, 184, 77);
 const OK: Color32 = Color32::from_rgb(92, 214, 140);
 const ERR: Color32 = Color32::from_rgb(255, 99, 99);
+const GAIN_DEFAULT: u32 = 0x200;
 const DIM: Color32 = Color32::from_rgb(130, 136, 152);
 
 fn main() -> eframe::Result<()> {
@@ -87,7 +88,6 @@ struct App {
     eq_en: u32,
     gain: u32,
     gain_loaded: u32,
-    gain_enabled: bool,
     status: String,
     status_ok: bool,
     presets: Vec<Preset>,
@@ -112,7 +112,6 @@ impl App {
             eq_en: 0,
             gain: 0x200,
             gain_loaded: 0x200,
-            gain_enabled: false,
             status: String::new(),
             status_ok: true,
             presets: presets::builtins().into_iter().chain(presets::load_user()).collect(),
@@ -172,7 +171,7 @@ impl App {
                     n += 1;
                 }
             }
-            if self.gain_enabled && self.gain != self.gain_loaded {
+            if self.gain != self.gain_loaded {
                 d.write(REG_DAC_GAIN, self.gain)?;
                 self.gain_loaded = self.gain;
                 n += 1;
@@ -198,7 +197,7 @@ impl App {
 
     fn pending(&self) -> usize {
         let b = (0..BANDS).filter(|&i| self.bands[i] != self.loaded[i]).count();
-        b + (self.gain_enabled && self.gain != self.gain_loaded) as usize
+        b + (self.gain != self.gain_loaded) as usize
     }
 
     // Custom title bar replacing the native window decorations: drag to move, double-click to maximize.
@@ -537,28 +536,26 @@ impl App {
         });
     }
 
-    fn preamp_ui(&mut self, ui: &mut egui::Ui) {
-        card(ui, CARD, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Preamp").strong().color(Color32::WHITE));
-                ui.label(
-                    RichText::new("(eksperimen, nyalakan saklar untuk mengubah)")
-                        .size(12.0)
-                        .color(DIM),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(format!("di perangkat: 0x{:03X}", self.gain_loaded)).color(DIM))
-                        .on_hover_text("Nilai register 0x66 yang terakhir dibaca/ditulis ke DAC");
-                    ui.add_enabled(
-                        self.gain_enabled,
-                        egui::DragValue::new(&mut self.gain)
-                            .range(0..=0x400)
-                            .hexadecimal(3, false, true),
-                    );
-                    toggle(ui, &mut self.gain_enabled);
+    // Output gain (reg 0x66) lives in a collapsed "Lanjutan" section: testing showed the EQ doesn't clip,
+    // so it only works as a volume trim. Shown as % of the factory value 0x200.
+    fn advanced_ui(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new(RichText::new("Lanjutan").size(13.0).color(DIM))
+            .id_salt("advanced")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Output gain").color(DIM))
+                        .on_hover_text("Volume digital DAC (register 0x66). 100% = bawaan pabrik.");
+                    let mut pct = self.gain as f32 * 100.0 / GAIN_DEFAULT as f32;
+                    let s = ui.add(egui::Slider::new(&mut pct, 0.0..=200.0).step_by(1.0).suffix(" %"));
+                    if s.changed() {
+                        self.gain = (pct * GAIN_DEFAULT as f32 / 100.0).round() as u32;
+                    }
+                    if self.gain != GAIN_DEFAULT && ui.small_button("Reset").clicked() {
+                        self.gain = GAIN_DEFAULT;
+                    }
                 });
             });
-        });
     }
 }
 
@@ -783,7 +780,7 @@ impl eframe::App for App {
                             ui.add_space(4.0);
                             self.bands_ui(ui);
                             ui.add_space(4.0);
-                            self.preamp_ui(ui);
+                            self.advanced_ui(ui);
                         });
                 });
             });
