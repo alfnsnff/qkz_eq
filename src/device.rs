@@ -8,34 +8,46 @@ const IFACE: i32 = 3;
 const RPT: u8 = 0x4B;
 const CMD_READ: u8 = 0x52;
 const CMD_WRITE: u8 = 0x57;
+const CMD_SAVE: u8 = 0x53;
 const ACK: u8 = 0x03;
 
+// The DSP designs its biquads for 24 kHz but runs them at the 48 kHz stream rate, so a band plays at
+// register f x 2. Bands are kept in audible Hz and halved on the wire (measured by the Contour project).
+const FREQ_SCALE: f32 = 2.0;
+
+pub const TYPE_PEAK: u16 = 0;
+pub const TYPE_LOW_SHELF: u16 = 3;
+pub const TYPE_HIGH_SHELF: u16 = 4;
+
 pub const REG_DAC_EQ_EN: u32 = 0x24;
+pub const EQ_ON: u32 = 3;
+pub const EQ_OFF: u32 = 2;
 pub const REG_DAC_EQ_BASE: u32 = 0x26;
 pub const REG_DAC_GAIN: u32 = 0x66;
 pub const BANDS: usize = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Band {
-    pub freq: u16, // Hz
+    pub freq: u16, // audible Hz (register holds freq / 2)
     pub gain: f32, // dB, stored as i16 gain*10
     pub q: f32,    // stored as Q*1000
-    pub kind: u16, // filter type, mapping unverified
+    pub kind: u16, // TYPE_PEAK, TYPE_LOW_SHELF or TYPE_HIGH_SHELF (register byte 2)
 }
 
 impl Band {
     pub fn from_regs(a: u32, b: u32) -> Self {
         Band {
-            freq: (a >> 16) as u16,
+            freq: ((a >> 16) as f32 * FREQ_SCALE).min(u16::MAX as f32) as u16,
             gain: (a as u16 as i16) as f32 / 10.0,
             q: (b & 0xFFFF) as f32 / 1000.0,
-            kind: (b >> 16) as u16,
+            kind: ((b >> 16) & 0xFF) as u16,
         }
     }
     pub fn to_regs(self) -> (u32, u32) {
+        let f = (self.freq as f32 / FREQ_SCALE).round() as u32;
         let g = (self.gain * 10.0).round() as i16 as u16 as u32;
         let q = ((self.q * 1000.0).round() as u32).min(0xFFFF);
-        (((self.freq as u32) << 16) | g, ((self.kind as u32) << 16) | q)
+        ((f << 16) | g, (((self.kind as u32) & 0xFF) << 16) | q)
     }
 }
 
@@ -88,6 +100,13 @@ impl Device {
         Ok(())
     }
 
+    // Commits the chip's current registers to flash. The dongle then leaves USB for ~1-3 s and re-enumerates,
+    // so no reply is awaited; the caller confirms by reading back after reconnecting.
+    pub fn save(&self) -> Result<(), String> {
+        let tx = [RPT, 0, 0, 0, 0, CMD_SAVE, 0, 0, 0, 0, 0];
+        self.h.write(&tx).map(|_| ()).map_err(|e| e.to_string())
+    }
+
     // ASCII stored little-endian across consecutive registers, NUL-terminated (e.g. firmware at 0x04).
     pub fn read_str(&self, start: u32, words: u32) -> Result<String, String> {
         let mut bytes = Vec::new();
@@ -126,11 +145,12 @@ mod tests {
 
     #[test]
     fn decodes_factory_band() {
+        // register 5000 plays at 10 kHz
         let b = Band::from_regs(0x1388_0000, 0x0000_02C3);
         assert_eq!(
             b,
             Band {
-                freq: 5000,
+                freq: 10000,
                 gain: 0.0,
                 q: 0.707,
                 kind: 0
@@ -147,7 +167,20 @@ mod tests {
             kind: 0,
         };
         let (a, bb) = b.to_regs();
-        assert_eq!(a, (60 << 16) | 0xFFBF);
+        assert_eq!(a, (30 << 16) | 0xFFBF);
         assert_eq!(Band::from_regs(a, bb), b);
+    }
+
+    #[test]
+    fn shelf_type_in_byte_two() {
+        let b = Band {
+            freq: 8000,
+            gain: 3.0,
+            q: 0.7,
+            kind: TYPE_HIGH_SHELF,
+        };
+        let (_, bb) = b.to_regs();
+        assert_eq!(bb, 0x0004_02BC);
+        assert_eq!(Band::from_regs(0, bb | 0xAB00_0000).kind, TYPE_HIGH_SHELF);
     }
 }

@@ -2,7 +2,9 @@
 mod device;
 mod presets;
 
-use device::{Band, Device, BANDS, REG_DAC_EQ_EN, REG_DAC_GAIN};
+use device::{
+    Band, Device, BANDS, EQ_OFF, EQ_ON, REG_DAC_EQ_EN, REG_DAC_GAIN, TYPE_HIGH_SHELF, TYPE_LOW_SHELF, TYPE_PEAK,
+};
 use eframe::egui::{self, Color32, FontId, RichText, Rounding, Stroke, Vec2};
 use presets::Preset;
 
@@ -97,6 +99,15 @@ struct App {
     dev_info: String,
     last_poll: std::time::Instant,
     logo: Option<egui::TextureHandle>,
+    saving: Option<PendingSave>,
+    confirm_save: bool,
+}
+
+// What a SAVE sent, checked against a read once the dongle is back on USB.
+struct PendingSave {
+    started: std::time::Instant,
+    bands: [Band; BANDS],
+    eq_en: u32,
 }
 
 impl App {
@@ -123,6 +134,8 @@ impl App {
             dev_info: String::new(),
             last_poll: std::time::Instant::now(),
             logo: None,
+            saving: None,
+            confirm_save: false,
         };
         app.connect();
         app
@@ -143,6 +156,10 @@ impl App {
                 );
                 self.dev = Some(d);
                 self.read_all();
+                // Right after a SAVE the dongle can enumerate before it answers reads; try again next poll.
+                if !self.status_ok {
+                    self.dev = None;
+                }
             }
             Err(_) => self.dev = None,
         }
@@ -160,7 +177,13 @@ impl App {
             None => {
                 self.connect();
                 if self.dev.is_some() {
-                    self.set_status(true, "DAC terhubung");
+                    match self.saving.take() {
+                        Some(s) => self.finish_save(s),
+                        None => self.set_status(true, "DAC terhubung"),
+                    }
+                } else if self.saving.as_ref().is_some_and(|s| s.started.elapsed().as_secs() > 12) {
+                    self.saving = None;
+                    self.set_status(false, "DAC belum kembali setelah menyimpan. Cabut lalu colokkan lagi.");
                 }
             }
             Some(d) => {
@@ -169,6 +192,87 @@ impl App {
                     self.set_status(false, "DAC terputus");
                 }
             }
+        }
+    }
+
+    // Apply pending edits, then SAVE. The dongle drops off USB right after; poll_connection picks it up again
+    // and finish_save compares a fresh read with what was sent.
+    fn save_to_dac(&mut self) {
+        if self.pending() > 0 {
+            self.apply();
+            if !self.status_ok {
+                return;
+            }
+        }
+        let Some(d) = &self.dev else { return };
+        let expected = PendingSave {
+            started: std::time::Instant::now(),
+            bands: self.loaded,
+            eq_en: self.eq_en & 0xFF,
+        };
+        match d.save() {
+            Ok(()) => {
+                self.dev = None;
+                self.saving = Some(expected);
+                self.last_poll = std::time::Instant::now();
+                self.set_status(true, "Menyimpan ke DAC…");
+            }
+            Err(e) => self.set_status(false, format!("Gagal menyimpan: {e}")),
+        }
+    }
+
+    fn finish_save(&mut self, s: PendingSave) {
+        let same = (0..BANDS).all(|i| self.loaded[i].to_regs() == s.bands[i].to_regs()) && self.eq_en & 0xFF == s.eq_en;
+        if same {
+            self.set_status(true, "Tersimpan di DAC — setelan ikut ke perangkat lain");
+        } else {
+            self.set_status(false, "DAC kembali, tapi setelannya tidak sama dengan yang disimpan");
+        }
+    }
+
+    fn save_confirm_ui(&mut self, ctx: &egui::Context) {
+        if !self.confirm_save {
+            return;
+        }
+        let mut go = false;
+        let mut close = false;
+        egui::Window::new("Simpan ke DAC")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .frame(
+                egui::Frame::window(&ctx.style())
+                    .fill(CARD)
+                    .rounding(Rounding::same(10.0))
+                    .inner_margin(egui::Margin::same(16.0)),
+            )
+            .show(ctx, |ui| {
+                ui.set_max_width(320.0);
+                ui.label("Setelan EQ saat ini akan disimpan di dongle, sehingga tetap terpakai saat dicolok ke HP atau PC lain.");
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Dongle akan terputus sekitar 1–3 detik dan suara berhenti sebentar.")
+                        .size(12.0)
+                        .color(DIM),
+                );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(egui::Button::new(RichText::new("Simpan").color(Color32::WHITE)).fill(ACCENT))
+                        .clicked()
+                    {
+                        go = true;
+                    }
+                    if ui.button("Batal").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        if go {
+            self.confirm_save = false;
+            self.save_to_dac();
+        } else if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.confirm_save = false;
         }
     }
 
@@ -191,15 +295,23 @@ impl App {
                     .tint(Color32::from_gray(150)),
             );
             ui.add_space(16.0);
-            ui.label(
-                RichText::new("DAC tidak terhubung")
-                    .size(18.0)
-                    .strong()
-                    .color(Color32::WHITE),
-            );
+            let (title, l1, l2) = if self.saving.is_some() {
+                (
+                    "Menyimpan ke DAC…",
+                    "Dongle sedang menyimpan dan tersambung ulang.",
+                    "Jangan cabut dongle.",
+                )
+            } else {
+                (
+                    "DAC tidak terhubung",
+                    "Colokkan QKZ TC MAX ke port USB.",
+                    "Aplikasi akan tersambung otomatis.",
+                )
+            };
+            ui.label(RichText::new(title).size(18.0).strong().color(Color32::WHITE));
             ui.add_space(2.0);
-            ui.label(RichText::new("Colokkan QKZ TC MAX ke port USB.").color(DIM));
-            ui.label(RichText::new("Aplikasi akan tersambung otomatis.").color(DIM));
+            ui.label(RichText::new(l1).color(DIM));
+            ui.label(RichText::new(l2).color(DIM));
             ui.add_space(14.0);
             ui.horizontal(|ui| {
                 let w = 16.0 + 6.0 + 110.0;
@@ -259,7 +371,10 @@ impl App {
         match d.write(REG_DAC_EQ_EN, en) {
             Ok(()) => {
                 self.eq_en = en;
-                self.set_status(true, format!("DAC EQ {}", if en != 0 { "aktif" } else { "nonaktif" }));
+                self.set_status(
+                    true,
+                    format!("DAC EQ {}", if en == EQ_ON { "aktif" } else { "nonaktif" }),
+                );
             }
             Err(e) => self.set_status(false, format!("Gagal: {e}")),
         }
@@ -333,12 +448,19 @@ impl App {
                         b.gain = 0.0;
                     }
                 }
+                if ui
+                    .button("Simpan ke DAC")
+                    .on_hover_text("Simpan setelan di dongle agar terbawa ke perangkat lain")
+                    .clicked()
+                {
+                    self.confirm_save = true;
+                }
                 ui.separator();
                 self.preset_controls(ui);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let mut on = self.eq_en != 0;
+                    let mut on = self.eq_en & 0xFF == EQ_ON;
                     if toggle(ui, &mut on).changed() {
-                        self.set_eq_enable(if on { 3 } else { 0 });
+                        self.set_eq_enable(if on { EQ_ON } else { EQ_OFF });
                     }
                     ui.label("DAC EQ");
                     ui.separator();
@@ -350,7 +472,7 @@ impl App {
     }
 
     fn bands_ui(&mut self, ui: &mut egui::Ui) {
-        let eq_on = self.eq_en != 0;
+        let eq_on = self.eq_en & 0xFF == EQ_ON;
         ui.columns(BANDS, |cols| {
             for (i, ui) in cols.iter_mut().enumerate() {
                 let dirty = self.bands[i] != self.loaded[i];
@@ -407,8 +529,14 @@ impl App {
                                 .speed(0.01)
                                 .fixed_decimals(3),
                         );
-                        field(ui, "Type", egui::DragValue::new(&mut b.kind).range(0..=7))
-                            .on_hover_text(format!("{} (arti type selain 0 belum dipastikan)", type_name(b.kind)));
+                        egui::ComboBox::from_id_salt(("type", i))
+                            .selected_text(type_name(b.kind))
+                            .width(ui.available_width())
+                            .show_ui(ui, |ui| {
+                                for k in [TYPE_PEAK, TYPE_LOW_SHELF, TYPE_HIGH_SHELF] {
+                                    ui.selectable_value(&mut b.kind, k, type_name(k));
+                                }
+                            });
                     });
                 });
             }
@@ -540,7 +668,7 @@ impl App {
                 Stroke::new(1.0_f32, DIM),
             );
 
-            let on = self.eq_en != 0;
+            let on = self.eq_en & 0xFF == EQ_ON;
             let n = rect.width().max(2.0) as usize;
             let pts: Vec<egui::Pos2> = (0..=n)
                 .map(|i| {
@@ -616,7 +744,7 @@ fn field(ui: &mut egui::Ui, label: &str, w: egui::DragValue) -> egui::Response {
     .inner
 }
 
-// Magnitude (dB) of an RBJ peaking biquad at 48 kHz. Assumes every type is peaking (type mapping unverified).
+// Magnitude (dB) of an RBJ biquad (peak or shelf, shelf Q = register Q) at the 48 kHz stream rate.
 fn response_db(b: &Band, f: f32) -> f32 {
     if b.gain.abs() < 0.01 || b.freq == 0 {
         return 0.0;
@@ -624,9 +752,38 @@ fn response_db(b: &Band, f: f32) -> f32 {
     let fs = 48000.0_f32;
     let a = 10f32.powf(b.gain / 40.0);
     let w0 = 2.0 * std::f32::consts::PI * (b.freq as f32).min(fs * 0.49) / fs;
-    let alpha = w0.sin() / (2.0 * b.q.max(0.05));
-    let (b0, b1, b2) = (1.0 + alpha * a, -2.0 * w0.cos(), 1.0 - alpha * a);
-    let (a0, a1, a2) = (1.0 + alpha / a, -2.0 * w0.cos(), 1.0 - alpha / a);
+    let (cw, alpha) = (w0.cos(), w0.sin() / (2.0 * b.q.max(0.05)));
+    let sa = 2.0 * a.sqrt() * alpha;
+    let ((b0, b1, b2), (a0, a1, a2)) = match b.kind {
+        TYPE_LOW_SHELF => (
+            (
+                a * ((a + 1.0) - (a - 1.0) * cw + sa),
+                2.0 * a * ((a - 1.0) - (a + 1.0) * cw),
+                a * ((a + 1.0) - (a - 1.0) * cw - sa),
+            ),
+            (
+                (a + 1.0) + (a - 1.0) * cw + sa,
+                -2.0 * ((a - 1.0) + (a + 1.0) * cw),
+                (a + 1.0) + (a - 1.0) * cw - sa,
+            ),
+        ),
+        TYPE_HIGH_SHELF => (
+            (
+                a * ((a + 1.0) + (a - 1.0) * cw + sa),
+                -2.0 * a * ((a - 1.0) + (a + 1.0) * cw),
+                a * ((a + 1.0) + (a - 1.0) * cw - sa),
+            ),
+            (
+                (a + 1.0) - (a - 1.0) * cw + sa,
+                2.0 * ((a - 1.0) - (a + 1.0) * cw),
+                (a + 1.0) - (a - 1.0) * cw - sa,
+            ),
+        ),
+        _ => (
+            (1.0 + alpha * a, -2.0 * cw, 1.0 - alpha * a),
+            (1.0 + alpha / a, -2.0 * cw, 1.0 - alpha / a),
+        ),
+    };
     let w = 2.0 * std::f32::consts::PI * f / fs;
     let (c1, s1, c2, s2) = (w.cos(), w.sin(), (2.0 * w).cos(), (2.0 * w).sin());
     let num = (b0 + b1 * c1 + b2 * c2).powi(2) + (b1 * s1 + b2 * s2).powi(2);
@@ -636,8 +793,10 @@ fn response_db(b: &Band, f: f32) -> f32 {
 
 fn type_name(k: u16) -> &'static str {
     match k {
-        0 => "Peak",
-        _ => "belum diketahui",
+        TYPE_PEAK => "Peak",
+        TYPE_LOW_SHELF => "Low shelf",
+        TYPE_HIGH_SHELF => "High shelf",
+        _ => "Lainnya",
     }
 }
 
@@ -775,6 +934,7 @@ fn toggle(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.poll_connection(ctx);
+        self.save_confirm_ui(ctx);
         // Auto apply waits for mouse release so a drag doesn't flood the device with writes.
         if self.auto_apply && self.dev.is_some() && self.pending() > 0 && !ctx.input(|i| i.pointer.any_down()) {
             self.apply();

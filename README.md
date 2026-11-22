@@ -15,11 +15,12 @@ A small native desktop equalizer for the **QKZ TC MAX** USB-C DAC dongle and, po
 The vendor ships no PC software for this dongle. `qkz_eq` talks to the chip directly over its HID control interface, so you can shape the DAC's built-in 5-band parametric EQ without any system-wide audio driver or APO.
 
 > [!WARNING]
-> This is an independent, reverse-engineered project. It is not affiliated with QKZ or KT Micro. Writing registers is done at your own risk. All changes are **live only** — nothing is written to flash, so unplugging the dongle restores its defaults.
+> This is an independent, reverse-engineered project. It is not affiliated with QKZ or KT Micro. Writing registers is done at your own risk. Changes are live until you press **Simpan ke DAC**, which stores them in the dongle's flash.
 
 ## Features
 
-- 5-band parametric EQ (frequency, gain, Q) running on the DAC itself
+- 5-band parametric EQ (frequency, gain, Q; peak and low/high shelf) running on the DAC itself
+- Save to the dongle's flash, so the EQ follows it to phones and other PCs without this app
 - Live frequency-response curve
 - Read / Apply with per-band change tracking, or optional auto-apply on release
 - Built-in presets plus your own, saved on the PC as JSON
@@ -32,7 +33,7 @@ The vendor ships no PC software for this dongle. `qkz_eq` talks to the chip dire
 |---|---|---|---|
 | QKZ TC MAX | `31B2:0111` | `CDSV001.003` | Tested |
 
-Other KT Micro dongles (VID `31B2`) likely use the same protocol but different PIDs. Use the [probe tools](tools/) to check yours and open an issue with the results.
+The JCally JM12 and Kiwi Ears Allegro Mini report the same `31B2:0111` and register map, so they will likely work too (untested here). Other KT Micro dongles may use different PIDs. Use the [probe tools](tools/) to check yours and open an issue with the results.
 
 ## Install
 
@@ -57,7 +58,8 @@ echo 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="31b2", MODE="0666"' | sudo tee /etc
 1. Plug in the dongle and start `qkz_eq`. It connects and reads the current EQ.
 2. Drag the band sliders. The curve updates immediately, and changed bands are highlighted.
 3. Press **Apply** (or enable **Auto apply**) to send the changes to the DAC.
-4. Save a setup under **Preset**. User presets live in `%APPDATA%\qkz_eq\presets.json` on Windows.
+4. Press **Simpan ke DAC** to keep them after unplugging. The dongle disconnects for 1–3 s while saving, then the app reads the settings back to confirm.
+5. Save a setup under **Preset**. User presets live in `%APPDATA%\qkz_eq\presets.json` on Windows.
 
 Double-click a gain slider to reset it to 0 dB.
 
@@ -76,11 +78,13 @@ docs/            Protocol and register documentation
 
 ## Roadmap
 
-- [ ] Identify filter `type` values (shelf / pass filters)
 - [ ] Measure output gain register scale
 - [ ] Support more KT Micro VID/PIDs
-- [ ] Optional save-to-flash, once the command is understood
-- [ ] Prebuilt release binaries
+- [ ] Analog Global Gain (register `0x3B`)
+
+## Acknowledgements
+
+The save command, frequency scaling and filter types were worked out by the [Contour](https://github.com/Chronosauros/contour) project, an open-source Android app for USB DAC EQs.
 
 ## Contributing
 
