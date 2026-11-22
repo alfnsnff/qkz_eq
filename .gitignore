@@ -1,0 +1,14 @@
+/target
+**/*.rs.bk
+
+# Python tools
+.venv/
+__pycache__/
+*.pyc
+
+# Local register dumps may contain device serials
+*_dump.txt
+
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,21 @@
+name: New device report
+description: Share probe results from a dongle that isn't supported yet
+labels: [device-support]
+body:
+  - type: input
+    attributes:
+      label: Brand and model
+      placeholder: e.g. Moondrop XYZ
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Output of tools/qkz_probe.py
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Register dump (tools/qkz_read.py)
+      description: Remove the serial registers (0x50–0x56) if you prefer.
+      render: text

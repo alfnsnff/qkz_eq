@@ -1,0 +1,25 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Device and firmware
+      description: Shown in the app's status bar, e.g. "QKZ TC MAX · firmware CDSV001.003"
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: OS
+      placeholder: Windows 11 23H2
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: qkz_eq version or commit

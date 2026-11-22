@@ -1,0 +1,22 @@
+[package]
+name = "qkz_eq"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Desktop parametric EQ for KT Micro based USB-C DAC dongles (QKZ TC MAX)"
+authors = ["Alfan Nufi <alfnsnff@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+keywords = ["equalizer", "dac", "usb-audio", "hid", "egui"]
+categories = ["multimedia::audio", "hardware-support"]
+
+[dependencies]
+eframe = "0.29"
+hidapi = "2.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
