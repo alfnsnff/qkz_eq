@@ -95,6 +95,8 @@ struct App {
     preset_name: String,
     auto_apply: bool,
     dev_info: String,
+    last_poll: std::time::Instant,
+    logo: Option<egui::TextureHandle>,
 }
 
 impl App {
@@ -119,6 +121,8 @@ impl App {
             preset_name: String::new(),
             auto_apply: false,
             dev_info: String::new(),
+            last_poll: std::time::Instant::now(),
+            logo: None,
         };
         app.connect();
         app
@@ -140,8 +144,74 @@ impl App {
                 self.dev = Some(d);
                 self.read_all();
             }
-            Err(e) => self.set_status(false, e),
+            Err(_) => self.dev = None,
         }
+    }
+
+    // Reconnect while unplugged, and notice an unplug while connected, without user action.
+    fn poll_connection(&mut self, ctx: &egui::Context) {
+        let every = if self.dev.is_some() { 2.0 } else { 1.0 };
+        ctx.request_repaint_after(std::time::Duration::from_secs_f32(every));
+        if self.last_poll.elapsed().as_secs_f32() < every {
+            return;
+        }
+        self.last_poll = std::time::Instant::now();
+        match &self.dev {
+            None => {
+                self.connect();
+                if self.dev.is_some() {
+                    self.set_status(true, "DAC terhubung");
+                }
+            }
+            Some(d) => {
+                if d.read(REG_DAC_EQ_EN).is_err() {
+                    self.dev = None;
+                    self.set_status(false, "DAC terputus");
+                }
+            }
+        }
+    }
+
+    fn disconnected_ui(&mut self, ui: &mut egui::Ui) {
+        let logo = self
+            .logo
+            .get_or_insert_with(|| {
+                let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).unwrap_or_default();
+                let img =
+                    egui::ColorImage::from_rgba_unmultiplied([icon.width as usize, icon.height as usize], &icon.rgba);
+                ui.ctx().load_texture("logo", img, egui::TextureOptions::LINEAR)
+            })
+            .clone();
+        let h = 64.0 + 16.0 + 22.0 + 6.0 + 36.0 + 22.0 + 30.0;
+        ui.add_space(((ui.available_height() - h) / 2.0).max(16.0));
+        ui.vertical_centered(|ui| {
+            ui.add(
+                egui::Image::new(&logo)
+                    .fit_to_exact_size(Vec2::splat(64.0))
+                    .tint(Color32::from_gray(150)),
+            );
+            ui.add_space(16.0);
+            ui.label(
+                RichText::new("DAC tidak terhubung")
+                    .size(18.0)
+                    .strong()
+                    .color(Color32::WHITE),
+            );
+            ui.add_space(2.0);
+            ui.label(RichText::new("Colokkan QKZ TC MAX ke port USB.").color(DIM));
+            ui.label(RichText::new("Aplikasi akan tersambung otomatis.").color(DIM));
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                let w = 16.0 + 6.0 + 110.0;
+                ui.add_space((ui.available_width() - w) / 2.0);
+                ui.add(egui::Spinner::new().size(14.0).color(DIM));
+                ui.label(RichText::new("Mencari perangkat…").size(12.0).color(DIM));
+            });
+            ui.add_space(10.0);
+            if ui.button("Coba sekarang").clicked() {
+                self.last_poll = std::time::Instant::now() - std::time::Duration::from_secs(5);
+            }
+        });
     }
 
     fn read_all(&mut self) {
@@ -242,16 +312,6 @@ impl App {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         card(ui, CARD, |ui| {
             ui.horizontal(|ui| {
-                if self.dev.is_none() {
-                    if ui
-                        .add(egui::Button::new(RichText::new("Connect").color(Color32::WHITE)).fill(ACCENT))
-                        .clicked()
-                    {
-                        self.connect();
-                    }
-                    ui.label(RichText::new("Colokkan DAC lalu tekan Connect").color(DIM));
-                    return;
-                }
                 let n = self.pending();
                 if ui.button("⟲  Read").clicked() {
                     self.read_all();
@@ -714,6 +774,7 @@ fn toggle(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        self.poll_connection(ctx);
         // Auto apply waits for mouse release so a drag doesn't flood the device with writes.
         if self.auto_apply && self.dev.is_some() && self.pending() > 0 && !ctx.input(|i| i.pointer.any_down()) {
             self.apply();
@@ -759,10 +820,11 @@ impl eframe::App for App {
                     egui::Frame::none()
                         .inner_margin(egui::Margin::same(10.0))
                         .show(ui, |ui| {
-                            self.toolbar(ui);
                             if self.dev.is_none() {
+                                self.disconnected_ui(ui);
                                 return;
                             }
+                            self.toolbar(ui);
                             ui.add_space(4.0);
                             self.curve_ui(ui);
                             ui.add_space(4.0);
