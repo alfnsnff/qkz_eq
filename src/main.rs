@@ -19,8 +19,8 @@ const DIM: Color32 = Color32::from_rgb(130, 136, 152);
 fn main() -> eframe::Result<()> {
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([820.0, 840.0])
-            .with_min_inner_size([720.0, 780.0])
+            .with_inner_size([720.0, 620.0])
+            .with_min_inner_size([640.0, 560.0])
             .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).unwrap_or_default())
             .with_decorations(false)
             .with_resizable(true),
@@ -44,7 +44,7 @@ fn setup_style(ctx: &egui::Context) {
     v.extreme_bg_color = Color32::from_rgb(14, 15, 19);
     v.selection.bg_fill = ACCENT;
     v.selection.stroke = Stroke::new(1.0_f32, Color32::WHITE);
-    let r = Rounding::same(8.0);
+    let r = Rounding::same(6.0);
     for w in [
         &mut v.widgets.inactive,
         &mut v.widgets.hovered,
@@ -63,21 +63,21 @@ fn setup_style(ctx: &egui::Context) {
     ctx.set_visuals(v);
 
     ctx.style_mut(|s| {
-        s.spacing.item_spacing = Vec2::new(8.0, 8.0);
-        s.spacing.button_padding = Vec2::new(14.0, 7.0);
+        s.spacing.item_spacing = Vec2::new(6.0, 6.0);
+        s.spacing.button_padding = Vec2::new(10.0, 4.0);
         s.spacing.slider_width = 200.0;
-        s.spacing.interact_size.y = 26.0;
-        s.text_styles.insert(egui::TextStyle::Body, FontId::proportional(14.0));
+        s.spacing.interact_size.y = 22.0;
+        s.text_styles.insert(egui::TextStyle::Body, FontId::proportional(13.0));
         s.text_styles
-            .insert(egui::TextStyle::Button, FontId::proportional(14.0));
+            .insert(egui::TextStyle::Button, FontId::proportional(13.0));
     });
 }
 
 fn card(ui: &mut egui::Ui, fill: Color32, add: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::none()
         .fill(fill)
-        .rounding(Rounding::same(12.0))
-        .inner_margin(egui::Margin::same(14.0))
+        .rounding(Rounding::same(10.0))
+        .inner_margin(egui::Margin::same(10.0))
         .show(ui, add);
 }
 
@@ -203,10 +203,10 @@ impl App {
     // Custom title bar replacing the native window decorations: drag to move, double-click to maximize.
     fn title_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("titlebar")
-            .exact_height(44.0)
+            .exact_height(36.0)
             .show_separator_line(false)
             .frame(egui::Frame::none().fill(BG).inner_margin(egui::Margin {
-                left: 16.0,
+                left: 12.0,
                 ..Default::default()
             }))
             .show(ctx, |ui| {
@@ -220,8 +220,8 @@ impl App {
                 }
 
                 ui.horizontal_centered(|ui| {
-                    ui.label(RichText::new("QKZ TC MAX").size(17.0).strong().color(Color32::WHITE));
-                    ui.label(RichText::new("Equalizer").size(17.0).color(DIM));
+                    ui.label(RichText::new("QKZ TC MAX").size(14.0).strong().color(Color32::WHITE));
+                    ui.label(RichText::new("Equalizer").size(14.0).color(DIM));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
                         if title_button(ui, TitleIcon::Close).clicked() {
@@ -273,6 +273,8 @@ impl App {
                         b.gain = 0.0;
                     }
                 }
+                ui.separator();
+                self.preset_controls(ui);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let mut on = self.eq_en != 0;
                     if toggle(ui, &mut on).changed() {
@@ -293,15 +295,22 @@ impl App {
             for (i, ui) in cols.iter_mut().enumerate() {
                 let dirty = self.bands[i] != self.loaded[i];
                 let b = &mut self.bands[i];
-                card(ui, if dirty { CARD_HI } else { CARD }, |ui| {
+                let frame = egui::Frame::none()
+                    .fill(if dirty { CARD_HI } else { CARD })
+                    .rounding(Rounding::same(10.0))
+                    .stroke(Stroke::new(1.0_f32, if dirty { PENDING } else { CARD }))
+                    .inner_margin(egui::Margin::symmetric(8.0, 8.0));
+                frame.show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new(format!("BAND {}", i + 1)).size(11.0).color(DIM));
-                        ui.label(
-                            RichText::new(fmt_freq(b.freq))
-                                .size(17.0)
-                                .strong()
-                                .color(Color32::WHITE),
-                        );
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("{}", i + 1)).size(11.0).color(DIM));
+                            ui.label(
+                                RichText::new(fmt_freq(b.freq))
+                                    .size(14.0)
+                                    .strong()
+                                    .color(Color32::WHITE),
+                            );
+                        });
                         let gcol = if b.gain > 0.05 {
                             ACCENT
                         } else if b.gain < -0.05 {
@@ -309,12 +318,11 @@ impl App {
                         } else {
                             DIM
                         };
-                        ui.label(RichText::new(format!("{:+.1} dB", b.gain)).size(15.0).color(gcol));
-                        ui.add_space(4.0);
+                        ui.label(RichText::new(format!("{:+.1} dB", b.gain)).size(13.0).color(gcol));
                         // Vertical sliders ignore the parent's center alignment, so place one in an explicit centered rect.
                         let (row, _) =
-                            ui.allocate_exact_size(Vec2::new(ui.available_width(), 200.0), egui::Sense::hover());
-                        let slot = egui::Rect::from_center_size(row.center(), Vec2::new(32.0, 200.0));
+                            ui.allocate_exact_size(Vec2::new(ui.available_width(), 140.0), egui::Sense::hover());
+                        let slot = egui::Rect::from_center_size(row.center(), Vec2::new(32.0, 140.0));
                         let s = ui
                             .add_enabled_ui(eq_on, |ui| {
                                 ui.put(
@@ -330,15 +338,7 @@ impl App {
                         if s.double_clicked() {
                             b.gain = 0.0;
                         }
-                        ui.add_space(4.0);
-                        field(
-                            ui,
-                            "Freq",
-                            egui::DragValue::new(&mut b.freq)
-                                .range(20..=20000)
-                                .speed(5.0)
-                                .suffix(" Hz"),
-                        );
+                        field(ui, "Hz", egui::DragValue::new(&mut b.freq).range(20..=20000).speed(5.0));
                         field(
                             ui,
                             "Q",
@@ -347,92 +347,80 @@ impl App {
                                 .speed(0.01)
                                 .fixed_decimals(3),
                         );
-                        field(ui, "Type", egui::DragValue::new(&mut b.kind).range(0..=7));
-                        ui.label(RichText::new(type_name(b.kind)).size(11.0).color(DIM))
-                            .on_hover_text("Arti type belum dipastikan; hanya 0 yang sudah terlihat di perangkat");
-                        let (rect, _) =
-                            ui.allocate_exact_size(Vec2::new(ui.available_width(), 4.0), egui::Sense::hover());
-                        if dirty {
-                            ui.painter()
-                                .rect_filled(rect.shrink2(Vec2::new(20.0, 0.0)), 2.0, PENDING);
-                        }
+                        field(ui, "Type", egui::DragValue::new(&mut b.kind).range(0..=7))
+                            .on_hover_text(format!("{} (arti type selain 0 belum dipastikan)", type_name(b.kind)));
                     });
                 });
             }
         });
     }
 
-    fn preset_ui(&mut self, ui: &mut egui::Ui) {
-        card(ui, CARD, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Preset").strong().color(Color32::WHITE));
-                let cur = self
-                    .preset_sel
-                    .map(|i| self.presets[i].name.clone())
-                    .unwrap_or_else(|| "— pilih —".into());
-                let mut pick = None;
-                egui::ComboBox::from_id_salt("preset")
-                    .selected_text(cur)
-                    .width(150.0)
-                    .show_ui(ui, |ui| {
-                        for (i, p) in self.presets.iter().enumerate() {
-                            let label = if p.builtin {
-                                p.name.clone()
-                            } else {
-                                format!("★ {}", p.name)
-                            };
-                            if ui.selectable_label(self.preset_sel == Some(i), label).clicked() {
-                                pick = Some(i);
-                            }
-                        }
-                    });
-                if let Some(i) = pick {
-                    self.preset_sel = Some(i);
-                    self.bands = self.presets[i].bands;
-                    if !self.presets[i].builtin {
-                        self.preset_name = self.presets[i].name.clone();
-                    }
-                    let msg = format!(
-                        "Preset \"{}\" dimuat{}",
-                        self.presets[i].name,
-                        if self.auto_apply { "" } else { " — tekan Apply" }
-                    );
-                    self.set_status(true, msg);
-                }
-                let can_del = self.preset_sel.is_some_and(|i| !self.presets[i].builtin);
-                if ui
-                    .add_enabled(can_del, egui::Button::new("Hapus").min_size(Vec2::new(0.0, 30.0)))
-                    .clicked()
-                {
-                    let i = self.preset_sel.take().unwrap();
-                    let name = self.presets.remove(i).name;
-                    match presets::save_user(&self.presets) {
-                        Ok(()) => self.set_status(true, format!("Preset \"{name}\" dihapus")),
-                        Err(e) => self.set_status(false, format!("Gagal simpan: {e}")),
+    // Preset dropdown for the toolbar row; saving and deleting live inside the popup to keep the row short.
+    fn preset_controls(&mut self, ui: &mut egui::Ui) {
+        let cur = self
+            .preset_sel
+            .map(|i| self.presets[i].name.clone())
+            .unwrap_or_else(|| "Preset".into());
+        let mut pick = None;
+        let mut save = None;
+        let mut delete = false;
+        egui::ComboBox::from_id_salt("preset")
+            .selected_text(cur)
+            .width(130.0)
+            .height(320.0)
+            .show_ui(ui, |ui| {
+                ui.set_min_width(200.0);
+                for (i, p) in self.presets.iter().enumerate() {
+                    let label = if p.builtin {
+                        p.name.clone()
+                    } else {
+                        format!("★ {}", p.name)
+                    };
+                    if ui.selectable_label(self.preset_sel == Some(i), label).clicked() {
+                        pick = Some(i);
                     }
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let name = self.preset_name.trim().to_string();
-                    if ui
-                        .add_enabled(
-                            !name.is_empty(),
-                            egui::Button::new("Simpan").min_size(Vec2::new(0.0, 30.0)),
-                        )
-                        .clicked()
-                    {
-                        self.save_preset(name);
-                    }
+                ui.separator();
+                ui.horizontal(|ui| {
                     ui.add(
                         egui::TextEdit::singleline(&mut self.preset_name)
-                            .hint_text("Nama preset baru")
-                            .desired_width(160.0)
-                            .min_size(Vec2::new(160.0, 30.0))
-                            .margin(egui::Margin::symmetric(10.0, 7.0))
-                            .vertical_align(egui::Align::Center),
+                            .hint_text("Nama preset")
+                            .desired_width(120.0),
                     );
+                    let name = self.preset_name.trim().to_string();
+                    if ui.add_enabled(!name.is_empty(), egui::Button::new("Simpan")).clicked() {
+                        save = Some(name);
+                    }
                 });
+                let can_del = self.preset_sel.is_some_and(|i| !self.presets[i].builtin);
+                if can_del && ui.small_button("Hapus preset ini").clicked() {
+                    delete = true;
+                }
             });
-        });
+        if let Some(name) = save {
+            self.save_preset(name);
+        }
+        if delete {
+            let i = self.preset_sel.take().unwrap();
+            let name = self.presets.remove(i).name;
+            match presets::save_user(&self.presets) {
+                Ok(()) => self.set_status(true, format!("Preset \"{name}\" dihapus")),
+                Err(e) => self.set_status(false, format!("Gagal simpan: {e}")),
+            }
+        }
+        if let Some(i) = pick {
+            self.preset_sel = Some(i);
+            self.bands = self.presets[i].bands;
+            if !self.presets[i].builtin {
+                self.preset_name = self.presets[i].name.clone();
+            }
+            let msg = format!(
+                "Preset \"{}\" dimuat{}",
+                self.presets[i].name,
+                if self.auto_apply { "" } else { " — tekan Apply" }
+            );
+            self.set_status(true, msg);
+        }
     }
 
     fn save_preset(&mut self, name: String) {
@@ -459,7 +447,7 @@ impl App {
 
     fn curve_ui(&self, ui: &mut egui::Ui) {
         card(ui, CARD, |ui| {
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 150.0), egui::Sense::hover());
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 110.0), egui::Sense::hover());
             let p = ui.painter_at(rect);
             let (fmin, fmax, db) = (20.0_f32, 20000.0_f32, 15.0_f32);
             let x_of = |f: f32| rect.left() + rect.width() * (f / fmin).log10() / (fmax / fmin).log10();
@@ -559,11 +547,13 @@ impl App {
     }
 }
 
-fn field(ui: &mut egui::Ui, label: &str, w: egui::DragValue) {
+fn field(ui: &mut egui::Ui, label: &str, w: egui::DragValue) -> egui::Response {
     ui.horizontal(|ui| {
-        ui.label(RichText::new(label).size(12.0).color(DIM));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.add(w));
-    });
+        ui.label(RichText::new(label).size(11.0).color(DIM));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.add(w))
+            .inner
+    })
+    .inner
 }
 
 // Magnitude (dB) of an RBJ peaking biquad at 48 kHz. Assumes every type is peaking (type mapping unverified).
@@ -671,7 +661,7 @@ enum TitleIcon {
 
 // Flat 46x44 caption button with a painted glyph; close turns red on hover.
 fn title_button(ui: &mut egui::Ui, icon: TitleIcon) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(46.0, 44.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(40.0, 36.0), egui::Sense::click());
     let p = ui.painter();
     if resp.hovered() {
         let fill = if icon == TitleIcon::Close {
@@ -735,13 +725,13 @@ impl eframe::App for App {
         self.title_bar(ctx);
         // Status bar: device identity on the left, last action result on the right.
         egui::TopBottomPanel::bottom("status")
-            .exact_height(32.0)
+            .exact_height(26.0)
             .show_separator_line(false)
             .frame(
                 egui::Frame::none()
                     .fill(Color32::from_rgb(14, 15, 19))
                     .stroke(Stroke::new(1.0_f32, Color32::from_rgb(36, 39, 50)))
-                    .inner_margin(egui::Margin::symmetric(16.0, 0.0)),
+                    .inner_margin(egui::Margin::symmetric(12.0, 0.0)),
             )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
@@ -767,14 +757,12 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     egui::Frame::none()
-                        .inner_margin(egui::Margin::same(16.0))
+                        .inner_margin(egui::Margin::same(10.0))
                         .show(ui, |ui| {
                             self.toolbar(ui);
                             if self.dev.is_none() {
                                 return;
                             }
-                            ui.add_space(4.0);
-                            self.preset_ui(ui);
                             ui.add_space(4.0);
                             self.curve_ui(ui);
                             ui.add_space(4.0);
