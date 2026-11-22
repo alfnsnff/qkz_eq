@@ -1,4 +1,14 @@
-# qkz_eq
+<p align="center">
+  <img src="assets/logo.svg" width="128" alt="qkz_eq logo">
+</p>
+
+<h1 align="center">qkz_eq</h1>
+
+<p align="center">
+  <a href="https://github.com/alfnsnff/qkz_eq/actions/workflows/ci.yml"><img src="https://github.com/alfnsnff/qkz_eq/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/alfnsnff/qkz_eq/releases/latest"><img src="https://img.shields.io/github/v/release/alfnsnff/qkz_eq" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
+</p>
 
 A small native desktop equalizer for the **QKZ TC MAX** USB-C DAC dongle and, potentially, other dongles built on **KT Micro** audio chips.
 
