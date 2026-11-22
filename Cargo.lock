@@ -2422,8 +2422,10 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "hidapi",
+ "raw-window-handle",
  "serde",
  "serde_json",
+ "windows-sys 0.59.0",
  "winresource",
 ]
 

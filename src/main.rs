@@ -20,7 +20,9 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([820.0, 840.0])
             .with_min_inner_size([720.0, 780.0])
-            .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).unwrap_or_default()),
+            .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).unwrap_or_default())
+            .with_decorations(false)
+            .with_resizable(true),
         ..Default::default()
     };
     eframe::run_native(
@@ -28,6 +30,7 @@ fn main() -> eframe::Result<()> {
         opts,
         Box::new(|cc| {
             setup_style(&cc.egui_ctx);
+            round_corners(cc);
             Ok(Box::new(App::new()))
         }),
     )
@@ -198,11 +201,43 @@ impl App {
         b + (self.gain_enabled && self.gain != self.gain_loaded) as usize
     }
 
-    fn header(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("QKZ TC MAX").size(22.0).strong().color(Color32::WHITE));
-            ui.label(RichText::new("Equalizer").size(22.0).color(DIM));
-        });
+    // Custom title bar replacing the native window decorations: drag to move, double-click to maximize.
+    fn title_bar(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("titlebar")
+            .exact_height(44.0)
+            .show_separator_line(false)
+            .frame(egui::Frame::none().fill(BG).inner_margin(egui::Margin {
+                left: 16.0,
+                ..Default::default()
+            }))
+            .show(ctx, |ui| {
+                let bar = ui.max_rect();
+                let drag = ui.interact(bar, ui.id().with("drag"), egui::Sense::click_and_drag());
+                if drag.double_clicked() {
+                    let max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+                } else if drag.drag_started_by(egui::PointerButton::Primary) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+
+                ui.horizontal_centered(|ui| {
+                    ui.label(RichText::new("QKZ TC MAX").size(17.0).strong().color(Color32::WHITE));
+                    ui.label(RichText::new("Equalizer").size(17.0).color(DIM));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        if title_button(ui, TitleIcon::Close).clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        if title_button(ui, TitleIcon::Maximize).clicked() {
+                            let max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+                        }
+                        if title_button(ui, TitleIcon::Minimize).clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                        }
+                    });
+                });
+            });
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
@@ -572,6 +607,106 @@ fn fmt_freq(f: u16) -> String {
     }
 }
 
+// Undecorated windows lose the native resize border, so detect the pointer near an edge and hand off to the OS.
+fn resize_edges(ctx: &egui::Context) {
+    use egui::{CursorIcon as C, ResizeDirection as D};
+    if ctx.input(|i| i.viewport().maximized.unwrap_or(false)) {
+        return;
+    }
+    let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) else {
+        return;
+    };
+    let r = ctx.screen_rect();
+    let m = 6.0;
+    let (l, rt, t, b) = (
+        pos.x < r.left() + m,
+        pos.x > r.right() - m,
+        pos.y < r.top() + m,
+        pos.y > r.bottom() - m,
+    );
+    let dir = match (l, rt, t, b) {
+        (true, _, true, _) => Some((D::NorthWest, C::ResizeNorthWest)),
+        (_, true, true, _) => Some((D::NorthEast, C::ResizeNorthEast)),
+        (true, _, _, true) => Some((D::SouthWest, C::ResizeSouthWest)),
+        (_, true, _, true) => Some((D::SouthEast, C::ResizeSouthEast)),
+        (true, ..) => Some((D::West, C::ResizeWest)),
+        (_, true, ..) => Some((D::East, C::ResizeEast)),
+        (_, _, true, _) => Some((D::North, C::ResizeNorth)),
+        (.., true) => Some((D::South, C::ResizeSouth)),
+        _ => None,
+    };
+    if let Some((d, cursor)) = dir {
+        ctx.set_cursor_icon(cursor);
+        if ctx.input(|i| i.pointer.primary_pressed()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(d));
+        }
+    }
+}
+
+// Ask Windows 11 DWM for rounded corners and a shadow on the undecorated window. No-op on older Windows.
+#[cfg(windows)]
+fn round_corners(cc: &eframe::CreationContext) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND};
+    let Ok(h) = cc.window_handle() else { return };
+    if let RawWindowHandle::Win32(w) = h.as_raw() {
+        let pref = DWMWCP_ROUND;
+        unsafe {
+            DwmSetWindowAttribute(
+                w.hwnd.get() as _,
+                DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+                &pref as *const _ as *const _,
+                std::mem::size_of_val(&pref) as u32,
+            );
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn round_corners(_: &eframe::CreationContext) {}
+
+#[derive(Clone, Copy, PartialEq)]
+enum TitleIcon {
+    Minimize,
+    Maximize,
+    Close,
+}
+
+// Flat 46x44 caption button with a painted glyph; close turns red on hover.
+fn title_button(ui: &mut egui::Ui, icon: TitleIcon) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(46.0, 44.0), egui::Sense::click());
+    let p = ui.painter();
+    if resp.hovered() {
+        let fill = if icon == TitleIcon::Close {
+            Color32::from_rgb(196, 43, 28)
+        } else {
+            CARD_HI
+        };
+        p.rect_filled(rect, 0.0, fill);
+    }
+    let col = if resp.hovered() {
+        Color32::WHITE
+    } else {
+        Color32::from_rgb(190, 195, 208)
+    };
+    let s = Stroke::new(1.2_f32, col);
+    let c = rect.center();
+    let h = 5.0;
+    match icon {
+        TitleIcon::Minimize => {
+            p.line_segment([c + Vec2::new(-h, 0.0), c + Vec2::new(h, 0.0)], s);
+        }
+        TitleIcon::Maximize => {
+            p.rect_stroke(egui::Rect::from_center_size(c, Vec2::splat(2.0 * h)), 1.0, s);
+        }
+        TitleIcon::Close => {
+            p.line_segment([c + Vec2::new(-h, -h), c + Vec2::new(h, h)], s);
+            p.line_segment([c + Vec2::new(-h, h), c + Vec2::new(h, -h)], s);
+        }
+    }
+    resp
+}
+
 // iOS-style switch
 fn toggle(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
     let size = Vec2::new(40.0, 22.0);
@@ -599,6 +734,8 @@ impl eframe::App for App {
                 self.auto_apply = false;
             }
         }
+        resize_edges(ctx);
+        self.title_bar(ctx);
         // Status bar: device identity on the left, last action result on the right.
         egui::TopBottomPanel::bottom("status")
             .exact_height(32.0)
@@ -635,8 +772,6 @@ impl eframe::App for App {
                     egui::Frame::none()
                         .inner_margin(egui::Margin::same(16.0))
                         .show(ui, |ui| {
-                            self.header(ui);
-                            ui.add_space(4.0);
                             self.toolbar(ui);
                             if self.dev.is_none() {
                                 return;
